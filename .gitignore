@@ -1,0 +1,55 @@
+# Binaries
+/pg_workload/pg_workload
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output files
+*.out
+*.json
+*.csv
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+go.sum
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+dist/
+build/
+
+# Temp files
+/tmp/
+*.tmp
+*.log
+
+# Config with secrets
+*.local.yaml
+*.local.yml
+.env
+.env.*
+
+# Claude
+.claude/

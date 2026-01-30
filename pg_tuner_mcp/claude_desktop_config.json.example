@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "pg_tuner": {
+      "command": "python",
+      "args": ["-m", "pg_tuner_mcp"],
+      "cwd": "/home/vx61/develop/pg_tuner/pg_tuner_mcp",
+      "env": {
+        "LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}

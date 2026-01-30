@@ -1,0 +1,102 @@
+# OLTP Standard Profile
+# Simulates a typical OLTP workload with mixed read/write operations
+
+name: oltp_standard
+description: Standard OLTP workload with 65% reads, 35% writes
+version: "1.0"
+
+schema:
+  type: oltp
+  scale: 1  # 1 = 10K accounts, 100K transactions
+
+queries:
+  # Point lookup by primary key - most common operation
+  - name: point_select
+    sql: |
+      SELECT id, account_number, name, email, balance, status, created_at, updated_at
+      FROM accounts
+      WHERE id = $1
+    type: read
+    weight: 40
+    params:
+      - type: random_int
+        min: 1
+        max: 10000  # Adjust based on scale
+
+  # Range scan with ordering and limit
+  - name: range_select
+    sql: |
+      SELECT id, account_number, name, balance, status
+      FROM accounts
+      WHERE balance BETWEEN $1 AND $2
+      ORDER BY balance
+      LIMIT 100
+    type: read
+    weight: 20
+    params:
+      - type: random_float
+        min: 0
+        max: 50000
+      - type: random_float
+        min: 50000
+        max: 100000
+
+  # Insert new transaction
+  - name: insert_tx
+    sql: |
+      INSERT INTO transactions (account_id, type, amount, description)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id
+    type: write
+    weight: 20
+    params:
+      - type: random_int
+        min: 1
+        max: 10000
+      - type: random_choice
+        values: ["deposit", "withdrawal", "transfer", "fee"]
+      - type: random_float
+        min: 1
+        max: 5000
+      - type: random_string
+        prefix: "TX-"
+        length: 8
+
+  # Update account balance
+  - name: update_balance
+    sql: |
+      UPDATE accounts
+      SET balance = balance + $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING balance
+    type: write
+    weight: 15
+    params:
+      - type: random_float
+        min: -1000
+        max: 1000
+      - type: random_int
+        min: 1
+        max: 10000
+
+  # Complex join with aggregation
+  - name: complex_join
+    sql: |
+      SELECT a.id, a.account_number, a.name, a.balance,
+             COUNT(t.id) as tx_count,
+             COALESCE(SUM(t.amount), 0) as total_amount
+      FROM accounts a
+      LEFT JOIN transactions t ON a.id = t.account_id
+      WHERE a.status = $1
+      GROUP BY a.id, a.account_number, a.name, a.balance
+      ORDER BY total_amount DESC
+      LIMIT 50
+    type: read
+    weight: 5
+    params:
+      - type: random_choice
+        values: ["active", "inactive", "suspended", "pending"]
+
+# Workload distribution summary:
+# - Read operations:  65% (point_select 40% + range_select 20% + complex_join 5%)
+# - Write operations: 35% (insert_tx 20% + update_balance 15%)

@@ -1,0 +1,44 @@
+profile:
+  name: "E-commerce B2C"
+  mode: simulation
+  description: "E-commerce pattern with evening peaks (19-22), higher weekend activity"
+
+load_pattern:
+  type: hourly
+  baseline_qps: 150
+  min_multiplier: 0.1
+  max_multiplier: 10.0
+  hourly_multipliers:
+    0: 0.25    # late night shoppers
+    1: 0.15
+    2: 0.10    # minimum
+    3: 0.10
+    4: 0.10
+    5: 0.15
+    6: 0.20    # early risers
+    7: 0.35
+    8: 0.50    # morning commute browsing
+    9: 0.60
+    10: 0.70
+    11: 0.80
+    12: 1.00   # lunch break shopping
+    13: 0.90
+    14: 0.85
+    15: 0.90
+    16: 1.00
+    17: 1.20   # after work
+    18: 1.50   # dinner time browsing
+    19: 1.80   # evening peak starts
+    20: 2.00   # peak shopping time
+    21: 1.90   # still high
+    22: 1.50   # winding down
+    23: 0.80   # late shoppers
+
+workload_distribution:
+  read: 60
+  write: 40    # higher writes: carts, orders, reviews
+
+connection_pattern:
+  min_connections: 10
+  max_connections: 100
+  scale_with_load: true

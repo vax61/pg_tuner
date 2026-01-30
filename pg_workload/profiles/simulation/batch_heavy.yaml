@@ -1,0 +1,44 @@
+profile:
+  name: "Batch Heavy / ETL"
+  mode: simulation
+  description: "ETL/Data Warehouse pattern with heavy overnight batch processing"
+
+load_pattern:
+  type: hourly
+  baseline_qps: 80
+  min_multiplier: 0.1
+  max_multiplier: 10.0
+  hourly_multipliers:
+    0: 1.80    # batch jobs running
+    1: 2.00    # peak batch processing
+    2: 2.00    # heavy ETL
+    3: 1.90
+    4: 1.70
+    5: 1.50    # batch winding down
+    6: 0.80    # transition
+    7: 0.50    # business hours starting
+    8: 0.40    # daytime - low batch
+    9: 0.35
+    10: 0.30
+    11: 0.30
+    12: 0.30
+    13: 0.30
+    14: 0.35
+    15: 0.40
+    16: 0.45
+    17: 0.50   # end of business day
+    18: 0.60
+    19: 0.70   # evening maintenance
+    20: 0.90
+    21: 1.10   # batch jobs starting
+    22: 1.40   # batch ramping up
+    23: 1.60
+
+workload_distribution:
+  read: 30
+  write: 70    # heavy writes for ETL/loading
+
+connection_pattern:
+  min_connections: 5
+  max_connections: 30
+  scale_with_load: true

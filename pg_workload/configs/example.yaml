@@ -1,0 +1,28 @@
+# pg_workload configuration example
+# All fields shown with their default values unless noted
+
+# Database connection settings
+# Can be overridden by environment variables: PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE
+database:
+  host: localhost        # PostgreSQL server hostname
+  port: 5432             # PostgreSQL server port
+  user: postgres         # Database user
+  password: ""           # Database password (recommend using PGPASSWORD env var)
+  dbname: postgres       # Database name
+  sslmode: prefer        # SSL mode: disable, allow, prefer, require, verify-ca, verify-full
+
+# Workload execution settings
+workload:
+  mode: burst            # Workload mode (only 'burst' supported currently)
+  profile: ""            # Path to workload profile YAML file (required for run)
+  duration: 15m          # Total test duration (minimum 5m)
+  warmup: 2m             # Warmup period before collecting metrics
+  cooldown: 1m           # Cooldown period after main test
+  connections: 10        # Number of database connections in the pool
+  workers: 4             # Number of concurrent worker goroutines
+  seed: 42               # Random seed for reproducibility
+
+# Output settings
+output:
+  file: ""               # Output file path (empty = stdout)
+  format: json           # Output format (json)
