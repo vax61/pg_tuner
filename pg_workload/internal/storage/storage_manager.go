@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -186,7 +187,7 @@ func (sm *StorageManager) Record(timestamp time.Time, operation string, latencyN
 	// Record in aggregator
 	var err error
 	if !success {
-		err = fmt.Errorf(errType)
+		err = errors.New(errType)
 	}
 	sm.aggregator.Record(timestamp, operation, latencyNs, err)
 }

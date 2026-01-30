@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
 	"github.com/myorg/pg_tuner/pg_workload/internal/config"
@@ -88,9 +92,37 @@ Examples:
 	RunE: runConfigShow,
 }
 
+var configSetupCmd = &cobra.Command{
+	Use:   "setup",
+	Short: "Interactive configuration setup",
+	Long: `Interactively configure pg_workload settings.
+
+Prompts for database connection details and optionally workload settings.
+Tests the connection before saving the configuration.
+
+The configuration is saved to ~/.pg_workload/config.yaml by default,
+or to a custom path with --output.
+
+Examples:
+  pg_workload config setup
+  pg_workload config setup --output ./config.yaml
+  pg_workload config setup --full  # Also configure workload settings
+`,
+	RunE: runConfigSetup,
+}
+
+// Setup flags
+var setupCfg struct {
+	Output   string
+	Full     bool
+	NoTest   bool
+	Force    bool
+}
+
 func init() {
 	// Add subcommands to config
 	configCmd.AddCommand(configInitCmd)
+	configCmd.AddCommand(configSetupCmd)
 	configCmd.AddCommand(configValidateCmd)
 	configCmd.AddCommand(configTestCmd)
 	configCmd.AddCommand(configShowCmd)
@@ -101,6 +133,12 @@ func init() {
 	// Init flags
 	configInitCmd.Flags().StringVarP(&configCfgFlags.Output, "output", "o", "", "output file (default: stdout)")
 	configInitCmd.Flags().BoolVarP(&configCfgFlags.Force, "force", "f", false, "overwrite existing file")
+
+	// Setup flags
+	configSetupCmd.Flags().StringVarP(&setupCfg.Output, "output", "o", "", "output file (default: ~/.pg_workload/config.yaml)")
+	configSetupCmd.Flags().BoolVar(&setupCfg.Full, "full", false, "also configure workload settings")
+	configSetupCmd.Flags().BoolVar(&setupCfg.NoTest, "no-test", false, "skip connection test")
+	configSetupCmd.Flags().BoolVarP(&setupCfg.Force, "force", "f", false, "overwrite existing file without confirmation")
 }
 
 func runConfigInit(cmd *cobra.Command, args []string) error {
@@ -430,4 +468,238 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 	fmt.Print(string(data))
 
 	return nil
+}
+
+func runConfigSetup(cmd *cobra.Command, args []string) error {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println("pg_workload Configuration Setup")
+	fmt.Println("================================")
+	fmt.Println()
+
+	// Database settings
+	fmt.Println("Database Connection")
+	fmt.Println("-------------------")
+
+	host := promptWithDefault(reader, "Host", "localhost")
+	portStr := promptWithDefault(reader, "Port", "5432")
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		port = 5432
+	}
+	user := promptWithDefault(reader, "User", "postgres")
+	password := promptPassword("Password")
+	dbname := promptWithDefault(reader, "Database name", "postgres")
+
+	// Build database config
+	dbCfg := config.DatabaseConfig{
+		Host:     host,
+		Port:     port,
+		User:     user,
+		Password: password,
+		DBName:   dbname,
+	}
+
+	// Test connection unless --no-test
+	if !setupCfg.NoTest {
+		fmt.Println()
+		fmt.Printf("Testing connection to %s@%s:%d/%s...\n", user, host, port, dbname)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		poolCfg := database.PoolConfig{
+			MinConns:          1,
+			MaxConns:          2,
+			MaxConnLifetime:   5 * time.Minute,
+			MaxConnIdleTime:   1 * time.Minute,
+			HealthCheckPeriod: 30 * time.Second,
+		}
+
+		pool, err := database.NewPoolWithConfig(ctx, &dbCfg, poolCfg)
+		if err != nil {
+			fmt.Printf("Connection failed: %v\n", err)
+			fmt.Println()
+
+			retry := promptWithDefault(reader, "Retry with different settings? [y/N]", "n")
+			if strings.ToLower(retry) == "y" {
+				return runConfigSetup(cmd, args)
+			}
+			return fmt.Errorf("connection failed, configuration not saved")
+		}
+		pool.Close()
+
+		fmt.Println("Connection successful!")
+	}
+
+	// Workload settings (if --full)
+	workloadCfg := config.WorkloadConfig{
+		Mode:        "burst",
+		Profile:     "oltp_standard",
+		Duration:    15 * time.Minute,
+		Warmup:      2 * time.Minute,
+		Cooldown:    1 * time.Minute,
+		Workers:     4,
+		Connections: 10,
+		Seed:        42,
+	}
+
+	if setupCfg.Full {
+		fmt.Println()
+		fmt.Println("Workload Settings")
+		fmt.Println("-----------------")
+
+		mode := promptWithDefault(reader, "Mode (burst/simulation)", "burst")
+		if mode != "burst" && mode != "simulation" {
+			mode = "burst"
+		}
+		workloadCfg.Mode = mode
+
+		durationStr := promptWithDefault(reader, "Duration", "15m")
+		if d, err := time.ParseDuration(durationStr); err == nil {
+			workloadCfg.Duration = d
+		}
+
+		workersStr := promptWithDefault(reader, "Workers", "4")
+		if w, err := strconv.Atoi(workersStr); err == nil && w > 0 {
+			workloadCfg.Workers = w
+		}
+
+		connsStr := promptWithDefault(reader, "Connections", "10")
+		if c, err := strconv.Atoi(connsStr); err == nil && c > 0 {
+			workloadCfg.Connections = c
+		}
+	}
+
+	// Build full config
+	cfg := &config.Config{
+		Database: dbCfg,
+		Workload: workloadCfg,
+		Output:   config.OutputConfig{},
+	}
+
+	// Determine output path
+	outputPath := setupCfg.Output
+	if outputPath == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			homeDir = "."
+		}
+		outputPath = filepath.Join(homeDir, ".pg_workload", "config.yaml")
+	}
+
+	// Check if file exists
+	if !setupCfg.Force {
+		if _, err := os.Stat(outputPath); err == nil {
+			fmt.Printf("\nFile %s already exists.\n", outputPath)
+			overwrite := promptWithDefault(reader, "Overwrite? [y/N]", "n")
+			if strings.ToLower(overwrite) != "y" {
+				fmt.Println("Configuration not saved.")
+				return nil
+			}
+		}
+	}
+
+	// Create directory if needed
+	dir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
+	}
+
+	// Generate YAML with comments
+	configContent := generateConfigYAML(cfg)
+
+	// Write file
+	if err := os.WriteFile(outputPath, []byte(configContent), 0600); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("Configuration saved to %s\n", outputPath)
+	fmt.Println()
+	fmt.Println("You can now run:")
+	fmt.Printf("  pg_workload run --config %s\n", outputPath)
+	fmt.Println()
+	fmt.Println("Or set as default:")
+	fmt.Printf("  export PG_WORKLOAD_CONFIG=%s\n", outputPath)
+
+	return nil
+}
+
+func promptWithDefault(reader *bufio.Reader, prompt, defaultVal string) string {
+	if defaultVal != "" {
+		fmt.Printf("%s [%s]: ", prompt, defaultVal)
+	} else {
+		fmt.Printf("%s: ", prompt)
+	}
+
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return defaultVal
+	}
+
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return defaultVal
+	}
+	return input
+}
+
+func promptPassword(prompt string) string {
+	fmt.Printf("%s: ", prompt)
+
+	// Try to read password without echo
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		password, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Println() // New line after password
+		if err != nil {
+			return ""
+		}
+		return string(password)
+	}
+
+	// Fallback for non-terminal (e.g., piped input)
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(input)
+}
+
+func generateConfigYAML(cfg *config.Config) string {
+	var sb strings.Builder
+
+	sb.WriteString("# pg_workload Configuration\n")
+	sb.WriteString("# Generated by pg_workload config setup\n")
+	sb.WriteString(fmt.Sprintf("# Created: %s\n", time.Now().Format("2006-01-02 15:04:05")))
+	sb.WriteString("\n")
+
+	sb.WriteString("# Database connection settings\n")
+	sb.WriteString("database:\n")
+	sb.WriteString(fmt.Sprintf("  host: %s\n", cfg.Database.Host))
+	sb.WriteString(fmt.Sprintf("  port: %d\n", cfg.Database.Port))
+	sb.WriteString(fmt.Sprintf("  user: %s\n", cfg.Database.User))
+	sb.WriteString(fmt.Sprintf("  password: %s\n", cfg.Database.Password))
+	sb.WriteString(fmt.Sprintf("  dbname: %s\n", cfg.Database.DBName))
+	sb.WriteString("\n")
+
+	sb.WriteString("# Workload settings\n")
+	sb.WriteString("workload:\n")
+	sb.WriteString(fmt.Sprintf("  mode: %s\n", cfg.Workload.Mode))
+	sb.WriteString(fmt.Sprintf("  profile: %s\n", cfg.Workload.Profile))
+	sb.WriteString(fmt.Sprintf("  duration: %s\n", cfg.Workload.Duration))
+	sb.WriteString(fmt.Sprintf("  warmup: %s\n", cfg.Workload.Warmup))
+	sb.WriteString(fmt.Sprintf("  cooldown: %s\n", cfg.Workload.Cooldown))
+	sb.WriteString(fmt.Sprintf("  workers: %d\n", cfg.Workload.Workers))
+	sb.WriteString(fmt.Sprintf("  connections: %d\n", cfg.Workload.Connections))
+	sb.WriteString(fmt.Sprintf("  seed: %d\n", cfg.Workload.Seed))
+	sb.WriteString("\n")
+
+	sb.WriteString("# Output settings\n")
+	sb.WriteString("output:\n")
+	sb.WriteString("  # file: results.json\n")
+	sb.WriteString("  # format: json\n")
+
+	return sb.String()
 }
