@@ -4,7 +4,8 @@
 *.dll
 *.so
 *.dylib
-pg_workload
+# Binary output (not the source directory cmd/pg_workload)
+/pg_workload
 
 # Test binary
 *.test
