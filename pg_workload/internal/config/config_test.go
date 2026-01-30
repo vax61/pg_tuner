@@ -188,12 +188,12 @@ func TestValidateErrors(t *testing.T) {
 		{
 			name:    "invalid mode",
 			modify:  func(c *Config) { c.Workload.Mode = "invalid" },
-			wantErr: "workload.mode must be 'burst'",
+			wantErr: "workload.mode must be 'burst' or 'simulation'",
 		},
 		{
 			name:    "duration too short",
-			modify:  func(c *Config) { c.Workload.Duration = 1 * time.Minute },
-			wantErr: "workload.duration must be >= 5m",
+			modify:  func(c *Config) { c.Workload.Duration = 30 * time.Second },
+			wantErr: "workload.duration must be >= 1m",
 		},
 		{
 			name:    "zero connections",

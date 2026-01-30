@@ -13,7 +13,15 @@ import (
 type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	Workload WorkloadConfig `yaml:"workload"`
+	Data     DataConfig     `yaml:"data"`
 	Output   OutputConfig   `yaml:"output"`
+}
+
+// DataConfig holds data loading settings.
+type DataConfig struct {
+	Scale           int    `yaml:"scale"`            // Scale factor for INSERT-based seeding
+	PreloadSize     string `yaml:"preload_size"`     // Target size for COPY preload (e.g., "10GB")
+	PreloadParallel int    `yaml:"preload_parallel"` // Parallel goroutines for COPY
 }
 
 // DatabaseConfig holds PostgreSQL connection settings.
@@ -77,12 +85,17 @@ func LoadConfigWithDefaults() *Config {
 		},
 		Workload: WorkloadConfig{
 			Mode:        "burst",
+			Profile:     "oltp",
 			Duration:    15 * time.Minute,
 			Warmup:      2 * time.Minute,
 			Cooldown:    1 * time.Minute,
 			Connections: 10,
 			Workers:     4,
 			Seed:        42,
+		},
+		Data: DataConfig{
+			Scale:           1,
+			PreloadParallel: 4,
 		},
 		Output: OutputConfig{
 			Format: "json",
@@ -128,17 +141,23 @@ func (c *Config) Validate() error {
 	if c.Database.DBName == "" {
 		return fmt.Errorf("database.dbname is required")
 	}
-	if c.Workload.Mode != "burst" {
-		return fmt.Errorf("workload.mode must be 'burst'")
+	if c.Workload.Mode != "burst" && c.Workload.Mode != "simulation" {
+		return fmt.Errorf("workload.mode must be 'burst' or 'simulation'")
 	}
-	if c.Workload.Duration < 5*time.Minute {
-		return fmt.Errorf("workload.duration must be >= 5m")
+	if c.Workload.Duration < 1*time.Minute {
+		return fmt.Errorf("workload.duration must be >= 1m")
 	}
 	if c.Workload.Connections < 1 {
 		return fmt.Errorf("workload.connections must be >= 1")
 	}
 	if c.Workload.Workers < 1 {
 		return fmt.Errorf("workload.workers must be >= 1")
+	}
+	if c.Data.Scale < 0 {
+		return fmt.Errorf("data.scale must be >= 0")
+	}
+	if c.Data.PreloadParallel < 1 {
+		c.Data.PreloadParallel = 4 // Default
 	}
 	return nil
 }

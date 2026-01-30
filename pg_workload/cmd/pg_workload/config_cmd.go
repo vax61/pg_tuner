@@ -535,7 +535,7 @@ func runConfigSetup(cmd *cobra.Command, args []string) error {
 	// Workload settings (if --full)
 	workloadCfg := config.WorkloadConfig{
 		Mode:        "burst",
-		Profile:     "oltp_standard",
+		Profile:     "oltp",
 		Duration:    15 * time.Minute,
 		Warmup:      2 * time.Minute,
 		Cooldown:    1 * time.Minute,
@@ -544,7 +544,32 @@ func runConfigSetup(cmd *cobra.Command, args []string) error {
 		Seed:        42,
 	}
 
+	// Data settings
+	dataCfg := config.DataConfig{
+		Scale:           1,
+		PreloadParallel: 4,
+	}
+
 	if setupCfg.Full {
+		fmt.Println()
+		fmt.Println("Workload Profile")
+		fmt.Println("----------------")
+		fmt.Println("Available profiles:")
+		fmt.Println("  1. oltp      - OLTP workload (point lookups, transactions, JOINs)")
+		fmt.Println("  2. olap      - OLAP workload (aggregations, large scans)")
+		fmt.Println("  3. mixed     - Mixed OLTP/OLAP")
+		fmt.Println()
+
+		profileChoice := promptWithDefault(reader, "Profile [1-3]", "1")
+		switch profileChoice {
+		case "2", "olap":
+			workloadCfg.Profile = "olap"
+		case "3", "mixed":
+			workloadCfg.Profile = "mixed"
+		default:
+			workloadCfg.Profile = "oltp"
+		}
+
 		fmt.Println()
 		fmt.Println("Workload Settings")
 		fmt.Println("-----------------")
@@ -569,12 +594,47 @@ func runConfigSetup(cmd *cobra.Command, args []string) error {
 		if c, err := strconv.Atoi(connsStr); err == nil && c > 0 {
 			workloadCfg.Connections = c
 		}
+
+		// Data loading settings
+		fmt.Println()
+		fmt.Println("Data Loading")
+		fmt.Println("------------")
+		fmt.Println("Choose how to load test data:")
+		fmt.Println("  1. Scale factor (small datasets, uses INSERT)")
+		fmt.Println("     Scale 1 = ~10K accounts, ~100K transactions")
+		fmt.Println("     Scale 10 = ~100K accounts, ~1M transactions")
+		fmt.Println()
+		fmt.Println("  2. Preload size (large datasets, uses COPY)")
+		fmt.Println("     Specify target size: 1GB, 5GB, 10GB, 50GB...")
+		fmt.Println("     COPY is 10-100x faster than INSERT")
+		fmt.Println()
+
+		loadMethod := promptWithDefault(reader, "Data loading method [1-2]", "1")
+
+		if loadMethod == "2" {
+			// Preload method
+			preloadSize := promptWithDefault(reader, "Preload size (e.g., 1GB, 5GB, 10GB)", "1GB")
+			dataCfg.PreloadSize = preloadSize
+			dataCfg.Scale = 0 // Disable scale when using preload
+
+			parallelStr := promptWithDefault(reader, "Parallel workers for COPY", "4")
+			if p, err := strconv.Atoi(parallelStr); err == nil && p > 0 {
+				dataCfg.PreloadParallel = p
+			}
+		} else {
+			// Scale factor method
+			scaleStr := promptWithDefault(reader, "Scale factor", "1")
+			if s, err := strconv.Atoi(scaleStr); err == nil && s > 0 {
+				dataCfg.Scale = s
+			}
+		}
 	}
 
 	// Build full config
 	cfg := &config.Config{
 		Database: dbCfg,
 		Workload: workloadCfg,
+		Data:     dataCfg,
 		Output:   config.OutputConfig{},
 	}
 
@@ -694,6 +754,19 @@ func generateConfigYAML(cfg *config.Config) string {
 	sb.WriteString(fmt.Sprintf("  workers: %d\n", cfg.Workload.Workers))
 	sb.WriteString(fmt.Sprintf("  connections: %d\n", cfg.Workload.Connections))
 	sb.WriteString(fmt.Sprintf("  seed: %d\n", cfg.Workload.Seed))
+	sb.WriteString("\n")
+
+	sb.WriteString("# Data loading settings\n")
+	sb.WriteString("data:\n")
+	if cfg.Data.PreloadSize != "" {
+		sb.WriteString(fmt.Sprintf("  preload_size: %s\n", cfg.Data.PreloadSize))
+		sb.WriteString(fmt.Sprintf("  preload_parallel: %d\n", cfg.Data.PreloadParallel))
+		sb.WriteString("  # scale: 0  # Disabled when using preload\n")
+	} else {
+		sb.WriteString(fmt.Sprintf("  scale: %d\n", cfg.Data.Scale))
+		sb.WriteString("  # preload_size: 10GB  # Uncomment for large datasets\n")
+		sb.WriteString("  # preload_parallel: 4\n")
+	}
 	sb.WriteString("\n")
 
 	sb.WriteString("# Output settings\n")
